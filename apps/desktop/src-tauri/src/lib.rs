@@ -1,3 +1,5 @@
+mod db;
+
 use std::{
     collections::HashMap,
     path::PathBuf,
@@ -5,6 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use db::{Database, DownloadRecord};
 use futures_util::StreamExt;
 use reqwest::{
     header::{HeaderMap, HeaderValue, REFERER, USER_AGENT},
@@ -25,9 +28,9 @@ const MIXIN_KEY_ENC_TAB: [usize; 64] = [
 
 type SharedState = Arc<AppState>;
 
-#[derive(Default)]
 struct AppState {
     tasks: Mutex<HashMap<String, DownloadTask>>,
+    db: Database,
 }
 
 #[derive(Clone, Serialize)]
@@ -204,6 +207,9 @@ async fn create_download(
     };
     insert_task(&state, task.clone())?;
 
+    // 写入 SQLite 下载历史
+    let _ = state.db.insert_download(&task.task_id, &bvid, "", &url);
+
     let task_id = task.task_id.clone();
     let shared_state = Arc::clone(state.inner());
     tauri::async_runtime::spawn(async move {
@@ -271,19 +277,28 @@ async fn run_download_task(
     });
 
     match download_video(&bvid, &task_id, &state, app).await {
-        Ok(filename) => {
+        Ok((filename, title, file_size)) => {
             let _ = update_task(&state, &task_id, |task| {
                 task.status = "succeeded".to_string();
                 task.progress = 100.0;
-                task.filename = Some(filename);
+                task.filename = Some(filename.clone());
                 task.error = None;
             });
+            // 更新 SQLite 记录
+            let _ = state.db.mark_succeeded(&task_id, &filename, Some(file_size));
+            // 回写标题到数据库
+            if !title.is_empty() {
+                let conn = state.db.update_title(&task_id, &title);
+                let _ = conn;
+            }
         }
         Err(error) => {
             let _ = update_task(&state, &task_id, |task| {
                 task.status = "failed".to_string();
-                task.error = Some(error);
+                task.error = Some(error.clone());
             });
+            // 更新 SQLite 记录
+            let _ = state.db.mark_failed(&task_id, &error);
         }
     }
 }
@@ -293,7 +308,7 @@ async fn download_video(
     task_id: &str,
     state: &SharedState,
     app: tauri::AppHandle,
-) -> Result<String, String> {
+) -> Result<(String, String, u64), String> {
     let client = http_client()?;
     let view = fetch_view(&client, bvid).await?;
     let download = fetch_play_url(&client, &view.bvid, view.cid).await?;
@@ -347,7 +362,7 @@ async fn download_video(
     file.flush()
         .await
         .map_err(|error| format!("保存视频文件失败：{error}"))?;
-    Ok(target_path.to_string_lossy().to_string())
+    Ok((target_path.to_string_lossy().to_string(), view.title, downloaded))
 }
 
 async fn fetch_view(client: &reqwest::Client, bvid: &str) -> Result<ViewData, String> {
@@ -691,16 +706,89 @@ fn update_task(
     Ok(())
 }
 
+#[tauri::command]
+fn get_download_history(
+    state: State<'_, SharedState>,
+    limit: Option<u32>,
+) -> Result<Vec<DownloadRecord>, String> {
+    state.db.list_downloads(limit.unwrap_or(50))
+}
+
+#[tauri::command]
+fn delete_download_record(
+    state: State<'_, SharedState>,
+    id: i64,
+) -> Result<(), String> {
+    state.db.delete_download(id)
+}
+
+#[tauri::command]
+fn clear_download_history(
+    state: State<'_, SharedState>,
+) -> Result<(), String> {
+    state.db.clear_downloads()
+}
+
+#[tauri::command]
+async fn reveal_file(path: String) -> Result<(), String> {
+    let file_path = std::path::Path::new(&path);
+    if !file_path.exists() {
+        return Err("文件不存在，可能已被移动或删除".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("打开文件位置失败：{e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", &path))
+            .spawn()
+            .map_err(|e| format!("打开文件位置失败：{e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(file_path.parent().unwrap_or(file_path))
+            .spawn()
+            .map_err(|e| format!("打开文件位置失败：{e}"))?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(Arc::new(AppState::default()))
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("无法获取应用数据目录");
+            let db_path = app_data_dir.join("downloads.db");
+            let db = Database::open(&db_path)
+                .expect("初始化数据库失败");
+            let state = Arc::new(AppState {
+                tasks: Mutex::new(HashMap::new()),
+                db,
+            });
+            app.manage(state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             system_status,
             search_videos,
             create_download,
             get_download_task,
-            proxy_image
+            proxy_image,
+            get_download_history,
+            delete_download_record,
+            clear_download_history,
+            reveal_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

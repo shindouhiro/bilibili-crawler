@@ -1,9 +1,9 @@
-import type { DownloadTask, SearchResult } from './types'
+import type { DownloadRecord, DownloadTask, SearchResult } from './types'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Progress from '@radix-ui/react-progress'
-import { AlertCircle, CheckCircle2, Clock, Download, ExternalLink, Eye, Film, ImageOff, Loader2, PlayCircle, Search, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { createDownload, getDownloadTask, getProxiedImageDataUrl, getProxiedImageUrl, searchVideos } from './api'
+import { AlertCircle, CheckCircle2, Clock, Download, ExternalLink, Eye, Film, FolderOpen, History, ImageOff, Loader2, PlayCircle, Search, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { clearDownloadHistory, createDownload, deleteDownloadRecord, getDownloadHistory, getDownloadTask, getProxiedImageDataUrl, getProxiedImageUrl, revealFile, searchVideos } from './api'
 import logoMarkUrl from './assets/logo-mark.svg'
 
 function formatDuration(seconds?: number | null): string {
@@ -81,6 +81,8 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
   const [selectedVideo, setSelectedVideo] = useState<SearchResult | null>(null)
+  const [history, setHistory] = useState<DownloadRecord[]>([])
+  const [showHistory, setShowHistory] = useState(false)
 
   const trimmedQuery = query.trim()
   const canSearch = trimmedQuery.length > 0 && !isSearching
@@ -97,6 +99,17 @@ export default function App() {
       return '下载完成'
     return '下载失败'
   }, [activeTask])
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      const records = await getDownloadHistory(50)
+      setHistory(records)
+    }
+    catch { /* 静默 */ }
+  }, [])
+
+  // 初始加载历史
+  useEffect(() => { void refreshHistory() }, [refreshHistory])
 
   useEffect(() => {
     if (!activeTask || !['queued', 'running'].includes(activeTask.status))
@@ -175,6 +188,13 @@ export default function App() {
       setError(downloadError instanceof Error ? downloadError.message : '创建下载任务失败')
     }
   }
+
+  // 下载完成/失败时刷新历史
+  useEffect(() => {
+    if (activeTask && (activeTask.status === 'succeeded' || activeTask.status === 'failed')) {
+      void refreshHistory()
+    }
+  }, [activeTask?.status, refreshHistory])
 
   return (
     <>
@@ -415,41 +435,15 @@ export default function App() {
                 )}
 
                 {activeTask?.filename != null && activeTask.filename.length > 0 && (
-                  <Dialog.Root>
-                    <Dialog.Trigger asChild>
-                      <button
-                        id="download-file-detail-button"
-                        className="relative z-10 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-400 hover:text-slate-900 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)] active:scale-[0.98]"
-                        type="button"
-                      >
-                        <Film className="size-4" />
-                        查看文件位置
-                      </button>
-                    </Dialog.Trigger>
-                    <Dialog.Portal>
-                      <Dialog.Overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 animate-fade-in-up data-[state=closed]:animate-out data-[state=closed]:fade-out" />
-                      <Dialog.Content className="fixed left-1/2 top-1/2 w-[min(92vw,560px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-slate-900 p-6 text-white shadow-2xl z-50 animate-fade-in-up glass-card">
-                        <div className="mb-6 flex items-center justify-between gap-4">
-                          <Dialog.Title className="text-xl font-heading font-semibold">下载详情</Dialog.Title>
-                          <Dialog.Close
-                            id="download-file-dialog-close-button"
-                            className="rounded-full p-2 text-slate-400 transition-all hover:bg-white/10 hover:text-white hover:rotate-90"
-                          >
-                            <X className="size-5" />
-                          </Dialog.Close>
-                        </div>
-
-                        <div className="space-y-4">
-                          <div>
-                            <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wider">保存路径</p>
-                            <p id="download-file-path" className="break-all rounded-xl bg-black/40 border border-white/5 p-4 text-sm font-mono text-cyan-100 shadow-inner">
-                              {activeTask.filename}
-                            </p>
-                          </div>
-                        </div>
-                      </Dialog.Content>
-                    </Dialog.Portal>
-                  </Dialog.Root>
+                  <button
+                    id="download-file-reveal-button"
+                    className="relative z-10 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 text-sm font-semibold text-cyan-300 transition-all hover:bg-cyan-400 hover:text-slate-900 hover:shadow-[0_0_20px_rgba(34,211,238,0.3)] active:scale-[0.98]"
+                    type="button"
+                    onClick={() => void revealFile(activeTask.filename!)}
+                  >
+                    <FolderOpen className="size-4" />
+                    在 Finder 中显示
+                  </button>
                 )}
 
                 {activeTask?.error != null && activeTask.error.length > 0 && (
@@ -459,6 +453,93 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              {/* Download History Toggle */}
+              <button
+                id="toggle-history-button"
+                className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl glass-panel py-3 text-sm font-semibold text-cyan-200 transition-all hover:border-cyan-400/40 hover:bg-cyan-400/10"
+                type="button"
+                onClick={() => { setShowHistory(v => !v); if (!showHistory) void refreshHistory() }}
+              >
+                <History className="size-4" />
+                {showHistory ? '收起历史' : '下载历史'}
+              </button>
+
+              {/* Download History Panel */}
+              {showHistory && (
+                <div className="mt-4 glass-panel rounded-2xl p-5 shadow-xl animate-fade-in-up">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-base font-heading font-semibold text-white flex items-center gap-2">
+                      <History className="size-4 text-cyan-400" />
+                      下载历史
+                    </h3>
+                    {history.length > 0 && (
+                      <button
+                        className="text-xs text-slate-400 hover:text-rose-400 transition-colors"
+                        type="button"
+                        onClick={() => { void clearDownloadHistory().then(() => refreshHistory()) }}
+                      >
+                        清空
+                      </button>
+                    )}
+                  </div>
+
+                  {history.length === 0 ? (
+                    <p className="text-sm text-slate-500 text-center py-6">暂无下载记录</p>
+                  ) : (
+                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1 scrollbar-thin">
+                      {history.map(record => (
+                        <div
+                          key={record.id}
+                          className="group rounded-xl bg-white/5 border border-white/5 p-3 transition-all hover:border-white/10"
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <p className="text-sm font-medium text-slate-200 line-clamp-1 flex-1" title={record.title || record.bvid}>
+                              {record.title || record.bvid}
+                            </p>
+                            <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded-md font-medium ${
+                              record.status === 'succeeded'
+                                ? 'bg-emerald-500/20 text-emerald-400'
+                                : record.status === 'failed'
+                                  ? 'bg-rose-500/20 text-rose-400'
+                                  : 'bg-yellow-500/20 text-yellow-400'
+                            }`}>
+                              {record.status === 'succeeded' ? '完成' : record.status === 'failed' ? '失败' : '进行中'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-slate-500">
+                              {record.created_at}
+                              {record.file_size ? ` · ${(record.file_size / 1024 / 1024).toFixed(1)} MB` : ''}
+                            </span>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {record.filename && record.status === 'succeeded' && (
+                                <button
+                                  className="p-1.5 rounded-lg text-cyan-400 hover:bg-cyan-400/20 transition-all"
+                                  title="在 Finder 中显示"
+                                  type="button"
+                                  onClick={() => void revealFile(record.filename!)}
+                                >
+                                  <FolderOpen className="size-3.5" />
+                                </button>
+                              )}
+                              <button
+                                className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 transition-all"
+                                title="删除记录"
+                                type="button"
+                                onClick={() => void deleteDownloadRecord(record.id).then(() => refreshHistory())}
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </aside>
           </div>
         </section>

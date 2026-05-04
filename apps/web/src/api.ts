@@ -1,4 +1,4 @@
-import type { DownloadTask, SearchPage } from './types'
+import type { DownloadRecord, DownloadTask, SearchPage } from './types'
 import { invoke } from '@tauri-apps/api/core'
 
 interface ApiErrorPayload {
@@ -95,4 +95,28 @@ export async function getDownloadTask(taskId: string): Promise<DownloadTask> {
 
   const response = await fetch(`/api/downloads/${taskId}`)
   return parseResponse<DownloadTask>(response)
+}
+
+export async function getDownloadHistory(limit = 50): Promise<DownloadRecord[]> {
+  if (!isTauriRuntime())
+    return []
+  return invokeOrThrow<DownloadRecord[]>('get_download_history', { limit }, '读取下载历史失败')
+}
+
+export async function deleteDownloadRecord(id: number): Promise<void> {
+  if (!isTauriRuntime())
+    return
+  return invokeOrThrow<void>('delete_download_record', { id }, '删除记录失败')
+}
+
+export async function clearDownloadHistory(): Promise<void> {
+  if (!isTauriRuntime())
+    return
+  return invokeOrThrow<void>('clear_download_history', {}, '清空历史失败')
+}
+
+export async function revealFile(path: string): Promise<void> {
+  if (!isTauriRuntime())
+    return
+  return invokeOrThrow<void>('reveal_file', { path }, '打开文件位置失败')
 }

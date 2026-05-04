@@ -22,3 +22,17 @@ export interface DownloadTask {
   filename?: string | null
   error?: string | null
 }
+
+export interface DownloadRecord {
+  id: number
+  task_id: string
+  bvid: string
+  title: string
+  url: string
+  filename?: string | null
+  file_size?: number | null
+  status: string
+  error?: string | null
+  created_at: string
+  completed_at?: string | null
+}
