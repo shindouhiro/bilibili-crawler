@@ -11,6 +11,7 @@
     "dev:web": "pnpm dev:stop && pnpm dev:start",
     "dev:web-only": "pnpm --filter @crawler/web dev",
     "dev:stop": "for port in 8000 5173; do lsof -ti tcp:$port | xargs kill 2>/dev/null || true; done",
+    "build:android": "pnpm --filter @crawler/desktop build:android",
     "build:desktop": "pnpm --filter @crawler/desktop build",
     "build:web": "pnpm --filter @crawler/web build",
     "lint": "pnpm --filter @crawler/web lint",

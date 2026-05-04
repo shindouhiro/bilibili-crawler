@@ -28,12 +28,10 @@ impl Database {
     /// 初始化数据库，创建必要的表
     pub fn open(db_path: &Path) -> Result<Self, String> {
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建数据库目录失败：{e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建数据库目录失败：{e}"))?;
         }
 
-        let conn = Connection::open(db_path)
-            .map_err(|e| format!("打开数据库失败：{e}"))?;
+        let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败：{e}"))?;
 
         conn.execute_batch(
             "

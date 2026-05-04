@@ -21,9 +21,9 @@ use uuid::Uuid;
 const USER_AGENT_VALUE: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 const SEARCH_REFERER: &str = "https://search.bilibili.com/";
 const MIXIN_KEY_ENC_TAB: [usize; 64] = [
-    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19,
-    29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
-    22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29,
+    28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25,
+    54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
 ];
 
 type SharedState = Arc<AppState>;
@@ -229,8 +229,7 @@ fn get_download_task(
 
 #[tauri::command]
 async fn proxy_image(url: String) -> Result<String, String> {
-    let parsed =
-        Url::parse(&url).map_err(|error| format!("图片地址无效：{error}"))?;
+    let parsed = Url::parse(&url).map_err(|error| format!("图片地址无效：{error}"))?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "图片地址缺少域名".to_string())?;
@@ -285,7 +284,9 @@ async fn run_download_task(
                 task.error = None;
             });
             // 更新 SQLite 记录
-            let _ = state.db.mark_succeeded(&task_id, &filename, Some(file_size));
+            let _ = state
+                .db
+                .mark_succeeded(&task_id, &filename, Some(file_size));
             // 回写标题到数据库
             if !title.is_empty() {
                 let conn = state.db.update_title(&task_id, &title);
@@ -362,7 +363,11 @@ async fn download_video(
     file.flush()
         .await
         .map_err(|error| format!("保存视频文件失败：{error}"))?;
-    Ok((target_path.to_string_lossy().to_string(), view.title, downloaded))
+    Ok((
+        target_path.to_string_lossy().to_string(),
+        view.title,
+        downloaded,
+    ))
 }
 
 async fn fetch_view(client: &reqwest::Client, bvid: &str) -> Result<ViewData, String> {
@@ -487,9 +492,11 @@ async fn fetch_wbi_mixin_key(client: &reqwest::Client) -> Result<String, String>
         .await
         .map_err(|error| format!("Bilibili WBI 配置解析失败：{error}"))?;
 
-    let data = response
-        .data
-        .ok_or_else(|| response.message.unwrap_or_else(|| "Bilibili WBI 配置为空".to_string()))?;
+    let data = response.data.ok_or_else(|| {
+        response
+            .message
+            .unwrap_or_else(|| "Bilibili WBI 配置为空".to_string())
+    })?;
     let raw_key = format!(
         "{}{}",
         filename_stem_from_url(&data.wbi_img.img_url)?,
@@ -715,49 +722,53 @@ fn get_download_history(
 }
 
 #[tauri::command]
-fn delete_download_record(
-    state: State<'_, SharedState>,
-    id: i64,
-) -> Result<(), String> {
+fn delete_download_record(state: State<'_, SharedState>, id: i64) -> Result<(), String> {
     state.db.delete_download(id)
 }
 
 #[tauri::command]
-fn clear_download_history(
-    state: State<'_, SharedState>,
-) -> Result<(), String> {
+fn clear_download_history(state: State<'_, SharedState>) -> Result<(), String> {
     state.db.clear_downloads()
 }
 
 #[tauri::command]
 async fn reveal_file(path: String) -> Result<(), String> {
-    let file_path = std::path::Path::new(&path);
-    if !file_path.exists() {
-        return Err("文件不存在，可能已被移动或删除".to_string());
-    }
-    #[cfg(target_os = "macos")]
+    #[cfg(mobile)]
     {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| format!("打开文件位置失败：{e}"))?;
+        let _ = path;
+        return Err("移动端不支持打开文件所在位置".to_string());
     }
-    #[cfg(target_os = "windows")]
+
+    #[cfg(desktop)]
     {
-        std::process::Command::new("explorer")
-            .arg(format!("/select,{}", &path))
-            .spawn()
-            .map_err(|e| format!("打开文件位置失败：{e}"))?;
+        let file_path = std::path::Path::new(&path);
+        if !file_path.exists() {
+            return Err("文件不存在，可能已被移动或删除".to_string());
+        }
+        #[cfg(target_os = "macos")]
+        {
+            std::process::Command::new("open")
+                .arg("-R")
+                .arg(&path)
+                .spawn()
+                .map_err(|e| format!("打开文件位置失败：{e}"))?;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            std::process::Command::new("explorer")
+                .arg(format!("/select,{}", &path))
+                .spawn()
+                .map_err(|e| format!("打开文件位置失败：{e}"))?;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(file_path.parent().unwrap_or(file_path))
+                .spawn()
+                .map_err(|e| format!("打开文件位置失败：{e}"))?;
+        }
+        Ok(())
     }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(file_path.parent().unwrap_or(file_path))
-            .spawn()
-            .map_err(|e| format!("打开文件位置失败：{e}"))?;
-    }
-    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -765,13 +776,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("无法获取应用数据目录");
+            let app_data_dir = app.path().app_data_dir().expect("无法获取应用数据目录");
             let db_path = app_data_dir.join("downloads.db");
-            let db = Database::open(&db_path)
-                .expect("初始化数据库失败");
+            let db = Database::open(&db_path).expect("初始化数据库失败");
             let state = Arc::new(AppState {
                 tasks: Mutex::new(HashMap::new()),
                 db,

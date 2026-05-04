@@ -51,7 +51,7 @@ jobs:
       - name: Setup Android NDK and Rust Targets
         if: matrix.platform == 'ubuntu-latest'
         run: |
-          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+          rustup target add aarch64-linux-android
           echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
 
       - name: Rename App (Windows)
@@ -85,10 +85,12 @@ jobs:
       - name: Build Tauri (Android)
         if: matrix.platform == 'ubuntu-latest'
         run: |
+          set -euxo pipefail
           cd apps/desktop
-          pnpm tauri android init || true
+          pnpm tauri android init --ci --skip-targets-install || true
           
-          # 设置 cc crate 的交叉编译环境变量，解决 rusqlite 等包含 C 代码的依赖编译报错
+          # 设置 cc crate 的交叉编译环境变量，解决 rusqlite 等包含 C 代码的依赖编译报错。
+          # CI 只打 arm64 APK，减少 32 位 ABI / x86 ABI 上的 C 交叉编译不确定性。
           export NDK="$ANDROID_NDK_LATEST_HOME"
           export HOST_TAG="linux-x86_64"
           export TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/$HOST_TAG"
@@ -97,19 +99,7 @@ jobs:
           export CC_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android24-clang"
           export CXX_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android24-clang++"
           
-          export AR_armv7_linux_androideabi="$TOOLCHAIN/bin/llvm-ar"
-          export CC_armv7_linux_androideabi="$TOOLCHAIN/bin/armv7a-linux-androideabi24-clang"
-          export CXX_armv7_linux_androideabi="$TOOLCHAIN/bin/armv7a-linux-androideabi24-clang++"
-          
-          export AR_i686_linux_android="$TOOLCHAIN/bin/llvm-ar"
-          export CC_i686_linux_android="$TOOLCHAIN/bin/i686-linux-android24-clang"
-          export CXX_i686_linux_android="$TOOLCHAIN/bin/i686-linux-android24-clang++"
-          
-          export AR_x86_64_linux_android="$TOOLCHAIN/bin/llvm-ar"
-          export CC_x86_64_linux_android="$TOOLCHAIN/bin/x86_64-linux-android24-clang"
-          export CXX_x86_64_linux_android="$TOOLCHAIN/bin/x86_64-linux-android24-clang++"
-          
-          pnpm tauri android build --apk --debug
+          pnpm tauri android build --apk --debug --target aarch64 --ci -vv
 
       - name: Collect Release Assets (macOS)
         if: matrix.platform == 'macos-latest'

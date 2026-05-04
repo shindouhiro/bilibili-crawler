@@ -3,8 +3,10 @@
   "private": true,
   "version": "0.1.6",
   "type": "module",
+  "scripts": {
     "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri dev",
     "build": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri build",
+    "build:android": "tauri android build --apk --target aarch64 --ci",
     "info": "PATH=\"$HOME/.cargo/bin:$PATH\" tauri info",
     "tauri": "tauri"
   },
