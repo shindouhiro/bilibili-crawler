@@ -4,6 +4,7 @@ import * as Progress from '@radix-ui/react-progress'
 import { AlertCircle, CheckCircle2, Clock, Download, ExternalLink, Eye, Film, ImageOff, Loader2, PlayCircle, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createDownload, getDownloadTask, getProxiedImageUrl, searchVideos } from './api'
+import logoMarkUrl from './assets/logo-mark.svg'
 
 function formatDuration(seconds?: number | null): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds <= 0)
@@ -155,8 +156,8 @@ export default function App() {
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
               <div>
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 shadow-[0_0_20px_rgba(34,211,238,0.4)]">
-                    <Film className="w-5 h-5 text-white" />
+                  <div className="flex items-center justify-center w-12 h-12 rounded-2xl shadow-[0_0_24px_rgba(34,211,238,0.42)]">
+                    <img alt="Bilibili Crawler" className="h-full w-full rounded-2xl" src={logoMarkUrl} />
                   </div>
                   <p className="text-sm font-bold tracking-[0.2em] text-cyan-400 uppercase drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]">
                     Bilibili Downloader

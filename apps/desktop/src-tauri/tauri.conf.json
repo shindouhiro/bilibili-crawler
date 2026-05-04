@@ -1,0 +1,34 @@
+{
+  "$schema": "./gen/schemas/desktop-schema.json",
+  "productName": "Bilibili Crawler",
+  "version": "0.1.0",
+  "identifier": "com.hikaru.bilibili-crawler",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../.. dev:web-only",
+    "beforeBuildCommand": "pnpm --dir ../.. build:web",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Bilibili Crawler",
+        "width": 1180,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 680,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' https://api.bilibili.com https://*.bilivideo.com https://*.bilivideo.cn https://*.bilibili.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Utility"
+  }
+}

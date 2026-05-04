@@ -184,7 +184,6 @@ async fn good(name: String) -> String {
 - `build.devUrl`: Must match your frontend dev server port
 - `app.security.capabilities`: Array of capability file identifiers
 
-**Plugin configuration** — Some plugins require additional `tauri.conf.json` blocks (e.g., `store`, `updater`). Always check the specific plugin docs at `v2.tauri.app/plugin/<plugin-name>/` for required config keys.
 
 ## Project Structure
 

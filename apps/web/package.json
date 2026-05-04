@@ -11,6 +11,7 @@
   "dependencies": {
     "@radix-ui/react-dialog": "catalog:frontend",
     "@radix-ui/react-progress": "catalog:frontend",
+    "@tauri-apps/api": "catalog:frontend",
     "lucide-react": "catalog:frontend",
     "react": "catalog:frontend",
     "react-dom": "catalog:frontend"
