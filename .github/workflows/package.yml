@@ -1,0 +1,112 @@
+name: Package
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, windows-latest]
+    
+    runs-on: ${{ matrix.platform }}
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Dependencies
+        run: pnpm install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rename App (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          sed -i 's/"productName": "Bilibili Crawler"/"productName": "Bilibili Crawler-Windows"/g' apps/desktop/src-tauri/tauri.conf.json
+
+      - name: Rename App (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          sed -i '' 's/"productName": "Bilibili Crawler"/"productName": "Bilibili Crawler-MacOS"/g' apps/desktop/src-tauri/tauri.conf.json
+
+      - name: Build Tauri (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          cd apps/desktop
+          pnpm tauri build --target universal-apple-darwin
+
+      - name: Build Tauri (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          cd apps/desktop
+          pnpm tauri build
+
+      - name: Collect Release Assets (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          mkdir -p release-assets
+          find apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" -exec cp {} release-assets/ \;
+          APP_PATH=$(find apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos -name "*.app" | head -n 1)
+          if [ -n "$APP_PATH" ]; then
+            APP_NAME=$(basename "$APP_PATH" .app)
+            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "release-assets/${APP_NAME}.zip"
+          fi
+
+      - name: Collect Release Assets (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          find apps/desktop/src-tauri/target/release/bundle/msi -name "*.msi" -exec cp {} release-assets/ \; || true
+          find apps/desktop/src-tauri/target/release/bundle/nsis -name "*.exe" -exec cp {} release-assets/ \; || true
+
+      - name: Wait for Release creation
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          MAX_RETRIES=30
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+            if gh release view "$TAG_NAME" > /dev/null 2>&1; then
+              echo "Release $TAG_NAME exists."
+              exit 0
+            fi
+            echo "Waiting for release $TAG_NAME to be created by changelogithub... ($i/$MAX_RETRIES)"
+            sleep 10
+          done
+          echo "Release not found, creating a fallback release..."
+          gh release create "$TAG_NAME" --title "$TAG_NAME" --notes "Release created as fallback." || true
+
+      - name: Upload Release Assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          gh release upload "$TAG_NAME" "release-assets/*" --clobber
