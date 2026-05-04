@@ -1,0 +1,19 @@
+{
+  "name": "bilibili-crawler-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "pnpm dev:web",
+    "dev:api": "uv run uvicorn crawler.api:app --host 0.0.0.0 --port 8000 --reload",
+    "dev:start": "concurrently -k -n API,WEB -c cyan,blue \"pnpm dev:api\" \"pnpm dev:web-only\"",
+    "dev:web": "pnpm dev:stop && pnpm dev:start",
+    "dev:web-only": "pnpm --filter @crawler/web dev",
+    "dev:stop": "for port in 8000 5173; do lsof -ti tcp:$port | xargs kill 2>/dev/null || true; done",
+    "build:web": "pnpm --filter @crawler/web build",
+    "lint": "pnpm --filter @crawler/web lint"
+  },
+  "devDependencies": {
+    "concurrently": "catalog:dev"
+  }
+}
