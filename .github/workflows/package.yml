@@ -87,7 +87,7 @@ jobs:
         run: |
           cd apps/desktop
           pnpm tauri android init || true
-          pnpm tauri android build --apk
+          pnpm tauri android build --apk --debug
 
       - name: Collect Release Assets (macOS)
         if: matrix.platform == 'macos-latest'
