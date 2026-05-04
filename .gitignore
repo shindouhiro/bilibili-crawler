@@ -10,3 +10,5 @@ apps/web/dist/
 *.tsbuildinfo
 downloads/
 *.egg-info/
+.codex/skills
+.agent/skills
