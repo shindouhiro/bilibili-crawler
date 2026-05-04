@@ -57,9 +57,29 @@ export function getProxiedImageUrl(url: string): string {
   return `/api/image?${params}`
 }
 
-export async function createDownload(url: string): Promise<DownloadTask> {
+/**
+ * 异步获取代理后的图片 URL。
+ * Tauri 端通过 Rust 后端代理获取 base64 data URI，
+ * Web 端直接返回 /api/image 代理地址。
+ */
+export async function getProxiedImageDataUrl(url: string): Promise<string> {
+  if (isTauriRuntime()) {
+    try {
+      return await invoke<string>('proxy_image', { url })
+    }
+    catch {
+      // 代理失败时返回空字符串，让 UI 展示占位图
+      return ''
+    }
+  }
+
+  const params = new URLSearchParams({ url })
+  return `/api/image?${params}`
+}
+
+export async function createDownload(url: string, bvid?: string): Promise<DownloadTask> {
   if (isTauriRuntime())
-    return invokeOrThrow<DownloadTask>('create_download', { url }, '创建下载任务失败')
+    return invokeOrThrow<DownloadTask>('create_download', { url: bvid || url }, '创建下载任务失败')
 
   const response = await fetch('/api/download', {
     method: 'POST',

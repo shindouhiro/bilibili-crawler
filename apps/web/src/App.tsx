@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as Progress from '@radix-ui/react-progress'
 import { AlertCircle, CheckCircle2, Clock, Download, ExternalLink, Eye, Film, ImageOff, Loader2, PlayCircle, Search, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { createDownload, getDownloadTask, getProxiedImageUrl, searchVideos } from './api'
+import { createDownload, getDownloadTask, getProxiedImageDataUrl, getProxiedImageUrl, searchVideos } from './api'
 import logoMarkUrl from './assets/logo-mark.svg'
 
 function formatDuration(seconds?: number | null): string {
@@ -39,6 +39,36 @@ function appendUniqueResults(current: SearchResult[], next: SearchResult[]): Sea
     return true
   })
   return [...current, ...uniqueNext]
+}
+
+function ProxiedImage({ src, alt, className }: { src: string, alt: string, className?: string }) {
+  const [resolvedSrc, setResolvedSrc] = useState<string>(() => getProxiedImageUrl(src))
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    getProxiedImageDataUrl(src).then((dataUrl) => {
+      if (!cancelled && dataUrl.length > 0)
+        setResolvedSrc(dataUrl)
+      else if (!cancelled)
+        setFailed(true)
+    }).catch(() => {
+      if (!cancelled)
+        setFailed(true)
+    })
+    return () => { cancelled = true }
+  }, [src])
+
+  if (failed) {
+    return (
+      <div className="flex flex-col gap-2 h-full items-center justify-center text-sm text-slate-500">
+        <ImageOff className="size-6 opacity-50" />
+        <span>加载失败</span>
+      </div>
+    )
+  }
+
+  return <img alt={alt} className={className} src={resolvedSrc} onError={() => setFailed(true)} />
 }
 
 export default function App() {
@@ -138,7 +168,7 @@ export default function App() {
     setError(null)
     setSelectedVideo(video)
     try {
-      const task = await createDownload(video.url)
+      const task = await createDownload(video.url, video.id)
       setActiveTask(task)
     }
     catch (downloadError) {
@@ -247,7 +277,7 @@ export default function App() {
                       {video.thumbnail != null && video.thumbnail.length > 0
                         ? (
                             <>
-                              <img alt={video.title} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105 group-hover:opacity-90" src={getProxiedImageUrl(video.thumbnail)} />
+                              <ProxiedImage alt={video.title} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105 group-hover:opacity-90" src={video.thumbnail} />
                               <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-transparent to-transparent opacity-80" />
                             </>
                           )

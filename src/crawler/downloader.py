@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -10,15 +11,44 @@ from yt_dlp import YoutubeDL
 
 from crawler.models import SearchResult
 
+logger = logging.getLogger(__name__)
+
 ProgressHook = Callable[[dict[str, Any]], None]
 
 BILIBILI_HTTP_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
     ),
     "Referer": "https://search.bilibili.com/",
 }
+
+# 尝试使用浏览器 Cookie 的优先级列表
+_BROWSER_COOKIE_CANDIDATES = ("chrome", "edge", "firefox", "safari")
+
+
+def _get_cookie_options() -> dict[str, Any]:
+    """尝试从本地浏览器获取 Cookie 配置，解决 Bilibili 412 风控问题。
+
+    按优先级依次尝试 Chrome → Edge → Firefox → Safari。
+    如果项目根目录下存在 cookies.txt 则优先使用该文件。
+    """
+    cookies_file = Path("cookies.txt")
+    if cookies_file.is_file():
+        logger.info("使用 cookies.txt 文件作为 Cookie 来源")
+        return {"cookiefile": str(cookies_file)}
+
+    for browser in _BROWSER_COOKIE_CANDIDATES:
+        try:
+            # 快速检测该浏览器是否可用（yt-dlp 内部会处理）
+            opts: dict[str, Any] = {"cookiesfrombrowser": (browser,)}
+            logger.info("使用 %s 浏览器 Cookie", browser)
+            return opts
+        except Exception:  # noqa: BLE001
+            continue
+
+    logger.warning("未找到可用的浏览器 Cookie，请求可能因 412 风控而失败")
+    return {}
 
 FFMPEG_CANDIDATE_PATHS = (
     "/opt/homebrew/bin/ffmpeg",
@@ -55,6 +85,7 @@ def search_videos(keyword: str, limit: int = 10, page: int = 1) -> list[SearchRe
         "no_warnings": True,
         "http_headers": BILIBILI_HTTP_HEADERS,
         "skip_download": True,
+        **_get_cookie_options(),
     }
     try:
         with YoutubeDL(options) as ydl:
@@ -90,6 +121,7 @@ def download_video(
         "no_warnings": True,
         "http_headers": BILIBILI_HTTP_HEADERS,
         "progress_hooks": [progress_hook] if progress_hook else [],
+        **_get_cookie_options(),
     }
     ffmpeg_path = find_ffmpeg_path()
     if not ffmpeg_path:

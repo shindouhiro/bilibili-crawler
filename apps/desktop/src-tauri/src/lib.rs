@@ -15,7 +15,7 @@ use tauri::{Manager, State};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
-const USER_AGENT_VALUE: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
+const USER_AGENT_VALUE: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 const SEARCH_REFERER: &str = "https://search.bilibili.com/";
 const MIXIN_KEY_ENC_TAB: [usize; 64] = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19,
@@ -141,6 +141,7 @@ async fn search_videos(query: String, page: u32, page_size: u32) -> Result<Searc
     let safe_page = page.clamp(1, 20);
     let safe_page_size = page_size.clamp(1, 30);
     let client = http_client()?;
+    seed_bilibili_cookies(&client).await?;
     let response: BilibiliResponse<SearchData> = client
         .get(
             signed_api_url(
@@ -218,6 +219,44 @@ fn get_download_task(
     state: State<'_, SharedState>,
 ) -> Result<DownloadTask, String> {
     get_task(&state, &task_id)?.ok_or_else(|| "下载任务不存在".to_string())
+}
+
+#[tauri::command]
+async fn proxy_image(url: String) -> Result<String, String> {
+    let parsed =
+        Url::parse(&url).map_err(|error| format!("图片地址无效：{error}"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "图片地址缺少域名".to_string())?;
+    if !host.ends_with("hdslb.com") && !host.ends_with("biliimg.com") {
+        return Err("只允许代理 Bilibili 图片".to_string());
+    }
+
+    let client = http_client()?;
+    let response = client
+        .get(parsed)
+        .header(REFERER, "https://www.bilibili.com/")
+        .send()
+        .await
+        .map_err(|error| format!("封面图片加载失败：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("封面图片加载失败：{error}"))?;
+
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_string();
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("读取图片数据失败：{error}"))?;
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{content_type};base64,{b64}"))
 }
 
 async fn run_download_task(
@@ -380,8 +419,23 @@ fn http_client() -> Result<reqwest::Client, String> {
 
     reqwest::Client::builder()
         .default_headers(headers)
+        .cookie_store(true)
         .build()
         .map_err(|error| format!("初始化 HTTP 客户端失败：{error}"))
+}
+
+/// 预热 Bilibili Cookie。
+/// 先访问 bilibili.com 主站获取 buvid3/buvid4 等必要 Cookie，
+/// 这些 Cookie 是通过 Bilibili 搜索 API 风控检测的前提条件。
+async fn seed_bilibili_cookies(client: &reqwest::Client) -> Result<(), String> {
+    // 访问主站首页以获取初始 Cookie
+    let _response = client
+        .get("https://www.bilibili.com")
+        .header(REFERER, "https://www.bilibili.com/")
+        .send()
+        .await
+        .map_err(|error| format!("预热 Bilibili Cookie 失败：{error}"))?;
+    Ok(())
 }
 
 async fn signed_api_url(
@@ -535,7 +589,9 @@ fn extract_bvid(value: &str) -> Result<String, String> {
         return Err("视频地址不能为空".to_string());
     }
 
-    for (index, _) in input.match_indices("BV") {
+    // 大小写不敏感搜索 "BV"
+    let upper = input.to_uppercase();
+    for (index, _) in upper.match_indices("BV") {
         let candidate = input[index..]
             .chars()
             .take_while(|character| character.is_ascii_alphanumeric())
@@ -643,7 +699,8 @@ pub fn run() {
             system_status,
             search_videos,
             create_download,
-            get_download_task
+            get_download_task,
+            proxy_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
