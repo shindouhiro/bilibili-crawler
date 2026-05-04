@@ -50,10 +50,12 @@ export async function searchVideos(query: string, page = 1, pageSize = 10): Prom
 }
 
 export function getProxiedImageUrl(url: string): string {
-  if (isTauriRuntime())
-    return url
+  const absoluteUrl = url.startsWith('//') ? `https:${url}` : url;
 
-  const params = new URLSearchParams({ url })
+  if (isTauriRuntime())
+    return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+
+  const params = new URLSearchParams({ url: absoluteUrl })
   return `/api/image?${params}`
 }
 
@@ -63,17 +65,20 @@ export function getProxiedImageUrl(url: string): string {
  * Web 端直接返回 /api/image 代理地址。
  */
 export async function getProxiedImageDataUrl(url: string): Promise<string> {
+  const absoluteUrl = url.startsWith('//') ? `https:${url}` : url;
+  
   if (isTauriRuntime()) {
     try {
-      return await invoke<string>('proxy_image', { url })
+      return await invoke<string>('proxy_image', { url: absoluteUrl })
     }
-    catch {
+    catch (error) {
+      console.error('图片代理失败:', absoluteUrl, error)
       // 代理失败时返回空字符串，让 UI 展示占位图
       return ''
     }
   }
 
-  const params = new URLSearchParams({ url })
+  const params = new URLSearchParams({ url: absoluteUrl })
   return `/api/image?${params}`
 }
 

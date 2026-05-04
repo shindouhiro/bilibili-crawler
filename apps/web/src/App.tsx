@@ -83,6 +83,8 @@ export default function App() {
   const [selectedVideo, setSelectedVideo] = useState<SearchResult | null>(null)
   const [history, setHistory] = useState<DownloadRecord[]>([])
   const [showHistory, setShowHistory] = useState(false)
+  const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean, title: string, message: string, onConfirm: () => void } | null>(null)
+
 
   const trimmedQuery = query.trim()
   const canSearch = trimmedQuery.length > 0 && !isSearching
@@ -478,9 +480,14 @@ export default function App() {
                         className="text-xs text-slate-400 hover:text-rose-400 transition-colors"
                         type="button"
                         onClick={() => {
-                          if (window.confirm('确定要清空所有下载记录吗？此操作不可恢复。')) {
-                            void clearDownloadHistory().then(() => refreshHistory())
-                          }
+                          setConfirmDialog({
+                            isOpen: true,
+                            title: '清空历史记录',
+                            message: '确定要清空所有下载记录吗？此操作不可恢复。',
+                            onConfirm: () => {
+                              void clearDownloadHistory().then(() => refreshHistory())
+                            }
+                          })
                         }}
                       >
                         清空
@@ -533,9 +540,14 @@ export default function App() {
                                 title="删除记录"
                                 type="button"
                                 onClick={() => {
-                                  if (window.confirm('确定要删除这条下载记录吗？')) {
-                                    void deleteDownloadRecord(record.id).then(() => refreshHistory())
-                                  }
+                                  setConfirmDialog({
+                                    isOpen: true,
+                                    title: '删除记录',
+                                    message: '确定要删除这条下载记录吗？',
+                                    onConfirm: () => {
+                                      void deleteDownloadRecord(record.id).then(() => refreshHistory())
+                                    }
+                                  })
                                 }}
                               >
                                 <Trash2 className="size-3.5" />
@@ -552,6 +564,43 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      {/* Confirmation Dialog */}
+      <Dialog.Root open={confirmDialog?.isOpen || false} onOpenChange={(open) => { if (!open) setConfirmDialog(null) }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] animate-fade-in-up data-[state=closed]:animate-out data-[state=closed]:fade-out" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 w-[min(92vw,400px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-slate-900 p-6 text-white shadow-2xl z-[100] animate-fade-in-up glass-card">
+            <div className="mb-4">
+              <Dialog.Title className="text-xl font-heading font-semibold text-white">
+                {confirmDialog?.title}
+              </Dialog.Title>
+            </div>
+            <Dialog.Description className="text-sm text-slate-300 mb-6 leading-relaxed">
+              {confirmDialog?.message}
+            </Dialog.Description>
+            <div className="flex justify-end gap-3">
+              <Dialog.Close asChild>
+                <button
+                  type="button"
+                  className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 transition-all hover:bg-white/10"
+                >
+                  取消
+                </button>
+              </Dialog.Close>
+              <button
+                type="button"
+                className="rounded-xl bg-rose-500/20 px-4 py-2 text-sm font-semibold text-rose-400 border border-rose-500/30 transition-all hover:bg-rose-500 hover:text-white"
+                onClick={() => {
+                  confirmDialog?.onConfirm()
+                  setConfirmDialog(null)
+                }}
+              >
+                确认
+              </button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   )
 }
