@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, windows-latest]
+        platform: [macos-latest, windows-latest, ubuntu-latest]
     
     runs-on: ${{ matrix.platform }}
     
@@ -41,6 +41,19 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      - name: Setup Java (for Android)
+        if: matrix.platform == 'ubuntu-latest'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Android NDK and Rust Targets
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
+
       - name: Rename App (Windows)
         if: matrix.platform == 'windows-latest'
         shell: bash
@@ -51,6 +64,11 @@ jobs:
         if: matrix.platform == 'macos-latest'
         run: |
           sed -i '' 's/"productName": "Bilibili Crawler"/"productName": "Bilibili Crawler-MacOS"/g' apps/desktop/src-tauri/tauri.conf.json
+
+      - name: Rename App (Android)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sed -i 's/"productName": "Bilibili Crawler"/"productName": "Bilibili Crawler"/g' apps/desktop/src-tauri/tauri.conf.json
 
       - name: Build Tauri (macOS)
         if: matrix.platform == 'macos-latest'
@@ -63,6 +81,13 @@ jobs:
         run: |
           cd apps/desktop
           pnpm tauri build
+
+      - name: Build Tauri (Android)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          cd apps/desktop
+          pnpm tauri android init || true
+          pnpm tauri android build --apk
 
       - name: Collect Release Assets (macOS)
         if: matrix.platform == 'macos-latest'
@@ -82,6 +107,14 @@ jobs:
           mkdir -p release-assets
           find apps/desktop/src-tauri/target/release/bundle/msi -name "*.msi" -exec cp {} release-assets/ \; || true
           find apps/desktop/src-tauri/target/release/bundle/nsis -name "*.exe" -exec cp {} release-assets/ \; || true
+
+      - name: Collect Release Assets (Android)
+        if: matrix.platform == 'ubuntu-latest'
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          # 提取通用 APK (通常位于 build/outputs/apk/universal/release)
+          find apps/desktop/src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -exec cp {} release-assets/ \; || true
 
       - name: Wait for Release creation
         if: startsWith(github.ref, 'refs/tags/v')
