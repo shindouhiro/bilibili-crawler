@@ -477,7 +477,11 @@ export default function App() {
                       <button
                         className="text-xs text-slate-400 hover:text-rose-400 transition-colors"
                         type="button"
-                        onClick={() => { void clearDownloadHistory().then(() => refreshHistory()) }}
+                        onClick={() => {
+                          if (window.confirm('确定要清空所有下载记录吗？此操作不可恢复。')) {
+                            void clearDownloadHistory().then(() => refreshHistory())
+                          }
+                        }}
                       >
                         清空
                       </button>
@@ -528,7 +532,11 @@ export default function App() {
                                 className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 transition-all"
                                 title="删除记录"
                                 type="button"
-                                onClick={() => void deleteDownloadRecord(record.id).then(() => refreshHistory())}
+                                onClick={() => {
+                                  if (window.confirm('确定要删除这条下载记录吗？')) {
+                                    void deleteDownloadRecord(record.id).then(() => refreshHistory())
+                                  }
+                                }}
                               >
                                 <Trash2 className="size-3.5" />
                               </button>
