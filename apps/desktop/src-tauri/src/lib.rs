@@ -10,8 +10,8 @@ use std::{
 use db::{Database, DownloadRecord};
 use futures_util::StreamExt;
 use reqwest::{
-    header::{HeaderMap, HeaderValue, REFERER, USER_AGENT},
-    Url,
+    header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, COOKIE, REFERER, USER_AGENT},
+    StatusCode, Url,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
@@ -19,6 +19,8 @@ use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 const USER_AGENT_VALUE: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+const ACCEPT_VALUE: &str = "application/json, text/plain, */*";
+const ACCEPT_LANGUAGE_VALUE: &str = "zh-CN,zh;q=0.9,en;q=0.8";
 const SEARCH_REFERER: &str = "https://search.bilibili.com/";
 const MIXIN_KEY_ENC_TAB: [usize; 64] = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29,
@@ -144,26 +146,29 @@ async fn search_videos(query: String, page: u32, page_size: u32) -> Result<Searc
     let safe_page = page.clamp(1, 20);
     let safe_page_size = page_size.clamp(1, 30);
     let client = http_client()?;
-    seed_bilibili_cookies(&client).await?;
+    let cookie = bilibili_cookie_header();
+    seed_bilibili_cookies(&client, &cookie).await?;
+    let search_url = signed_api_url(
+        &client,
+        &cookie,
+        "https://api.bilibili.com/x/web-interface/search/type",
+        vec![
+            ("search_type", "video".to_string()),
+            ("keyword", keyword.to_string()),
+            ("page", safe_page.to_string()),
+            ("page_size", safe_page_size.to_string()),
+        ],
+    )
+    .await?;
     let response: BilibiliResponse<SearchData> = client
-        .get(
-            signed_api_url(
-                &client,
-                "https://api.bilibili.com/x/web-interface/search/type",
-                vec![
-                    ("search_type", "video".to_string()),
-                    ("keyword", keyword.to_string()),
-                    ("page", safe_page.to_string()),
-                    ("page_size", safe_page_size.to_string()),
-                ],
-            )
-            .await?,
-        )
+        .get(search_url)
+        .header(REFERER, SEARCH_REFERER)
+        .header(COOKIE, cookie)
         .send()
         .await
         .map_err(|error| format!("Bilibili 搜索失败：{error}"))?
         .error_for_status()
-        .map_err(|error| format!("Bilibili 搜索失败：{error}"))?
+        .map_err(|error| map_bilibili_http_error(error, "Bilibili 搜索失败"))?
         .json()
         .await
         .map_err(|error| format!("Bilibili 搜索响应解析失败：{error}"))?;
@@ -241,11 +246,12 @@ async fn proxy_image(url: String) -> Result<String, String> {
     let response = client
         .get(parsed)
         .header(REFERER, "https://www.bilibili.com/")
+        .header(COOKIE, bilibili_cookie_header())
         .send()
         .await
         .map_err(|error| format!("封面图片加载失败：{error}"))?
         .error_for_status()
-        .map_err(|error| format!("封面图片加载失败：{error}"))?;
+        .map_err(|error| map_bilibili_http_error(error, "封面图片加载失败"))?;
 
     let content_type = response
         .headers()
@@ -311,8 +317,9 @@ async fn download_video(
     app: tauri::AppHandle,
 ) -> Result<(String, String, u64), String> {
     let client = http_client()?;
-    let view = fetch_view(&client, bvid).await?;
-    let download = fetch_play_url(&client, &view.bvid, view.cid).await?;
+    let cookie = bilibili_cookie_header();
+    let view = fetch_view(&client, &cookie, bvid).await?;
+    let download = fetch_play_url(&client, &cookie, &view.bvid, view.cid).await?;
     let target_dir = app
         .path()
         .download_dir()
@@ -333,11 +340,12 @@ async fn download_video(
     let response = client
         .get(&download.url)
         .header(REFERER, format!("https://www.bilibili.com/video/{bvid}"))
+        .header(COOKIE, cookie)
         .send()
         .await
         .map_err(|error| format!("视频下载请求失败：{error}"))?
         .error_for_status()
-        .map_err(|error| format!("视频下载失败：{error}"))?;
+        .map_err(|error| map_bilibili_http_error(error, "视频下载失败"))?;
     let total_size = response.content_length().or(download.size).unwrap_or(0);
     let mut stream = response.bytes_stream();
     let mut file = tokio::fs::File::create(&target_path)
@@ -370,18 +378,24 @@ async fn download_video(
     ))
 }
 
-async fn fetch_view(client: &reqwest::Client, bvid: &str) -> Result<ViewData, String> {
+async fn fetch_view(
+    client: &reqwest::Client,
+    cookie: &str,
+    bvid: &str,
+) -> Result<ViewData, String> {
     let mut url = Url::parse("https://api.bilibili.com/x/web-interface/view")
         .map_err(|error| error.to_string())?;
     url.query_pairs_mut().append_pair("bvid", bvid);
 
     let response: BilibiliResponse<ViewData> = client
         .get(url)
+        .header(REFERER, format!("https://www.bilibili.com/video/{bvid}"))
+        .header(COOKIE, cookie)
         .send()
         .await
         .map_err(|error| format!("读取视频信息失败：{error}"))?
         .error_for_status()
-        .map_err(|error| format!("读取视频信息失败：{error}"))?
+        .map_err(|error| map_bilibili_http_error(error, "读取视频信息失败"))?
         .json()
         .await
         .map_err(|error| format!("视频信息解析失败：{error}"))?;
@@ -396,6 +410,7 @@ async fn fetch_view(client: &reqwest::Client, bvid: &str) -> Result<ViewData, St
 
 async fn fetch_play_url(
     client: &reqwest::Client,
+    cookie: &str,
     bvid: &str,
     cid: u64,
 ) -> Result<DownloadUrl, String> {
@@ -411,11 +426,12 @@ async fn fetch_play_url(
     let response: BilibiliResponse<PlayData> = client
         .get(url)
         .header(REFERER, format!("https://www.bilibili.com/video/{bvid}"))
+        .header(COOKIE, cookie)
         .send()
         .await
         .map_err(|error| format!("读取播放地址失败：{error}"))?
         .error_for_status()
-        .map_err(|error| format!("读取播放地址失败：{error}"))?
+        .map_err(|error| map_bilibili_http_error(error, "读取播放地址失败"))?
         .json()
         .await
         .map_err(|error| format!("播放地址解析失败：{error}"))?;
@@ -435,6 +451,11 @@ async fn fetch_play_url(
 fn http_client() -> Result<reqwest::Client, String> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
+    headers.insert(ACCEPT, HeaderValue::from_static(ACCEPT_VALUE));
+    headers.insert(
+        ACCEPT_LANGUAGE,
+        HeaderValue::from_static(ACCEPT_LANGUAGE_VALUE),
+    );
     headers.insert(REFERER, HeaderValue::from_static(SEARCH_REFERER));
 
     reqwest::Client::builder()
@@ -447,23 +468,53 @@ fn http_client() -> Result<reqwest::Client, String> {
 /// 预热 Bilibili Cookie。
 /// 先访问 bilibili.com 主站获取 buvid3/buvid4 等必要 Cookie，
 /// 这些 Cookie 是通过 Bilibili 搜索 API 风控检测的前提条件。
-async fn seed_bilibili_cookies(client: &reqwest::Client) -> Result<(), String> {
+async fn seed_bilibili_cookies(client: &reqwest::Client, cookie: &str) -> Result<(), String> {
     // 访问主站首页以获取初始 Cookie
     let _response = client
         .get("https://www.bilibili.com")
         .header(REFERER, "https://www.bilibili.com/")
+        .header(COOKIE, cookie)
         .send()
         .await
         .map_err(|error| format!("预热 Bilibili Cookie 失败：{error}"))?;
     Ok(())
 }
 
+fn bilibili_cookie_header() -> String {
+    let timestamp = unix_timestamp();
+    let buvid = Uuid::new_v4().simple().to_string().to_uppercase();
+    let uuid = Uuid::new_v4().simple().to_string().to_uppercase();
+    let b_lsid = Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(16)
+        .collect::<String>()
+        .to_uppercase();
+
+    format!(
+        "buvid3={buvid}infoc; buvid4={buvid}-{timestamp}; b_nut={timestamp}; _uuid={uuid}; b_lsid={b_lsid}_{timestamp}; enable_web_push=DISABLE"
+    )
+}
+
+fn map_bilibili_http_error(error: reqwest::Error, context: &str) -> String {
+    if error.status() == Some(StatusCode::PRECONDITION_FAILED) {
+        return format!("{context}：Bilibili 返回 412 风控拦截。请稍后重试，或切换网络后再试。");
+    }
+
+    match error.status() {
+        Some(status) => format!("{context}：HTTP {status}"),
+        None => format!("{context}：{error}"),
+    }
+}
+
 async fn signed_api_url(
     client: &reqwest::Client,
+    cookie: &str,
     base_url: &str,
     mut params: Vec<(&str, String)>,
 ) -> Result<Url, String> {
-    let mixin_key = fetch_wbi_mixin_key(client).await?;
+    let mixin_key = fetch_wbi_mixin_key(client, cookie).await?;
     let wts = unix_timestamp().to_string();
     params.push(("wts", wts));
     params.sort_by(|left, right| left.0.cmp(right.0));
@@ -476,18 +527,19 @@ async fn signed_api_url(
     Ok(url)
 }
 
-async fn fetch_wbi_mixin_key(client: &reqwest::Client) -> Result<String, String> {
+async fn fetch_wbi_mixin_key(client: &reqwest::Client, cookie: &str) -> Result<String, String> {
     let response: BilibiliResponse<NavData> = client
         .get(
             Url::parse("https://api.bilibili.com/x/web-interface/nav")
                 .map_err(|error| error.to_string())?,
         )
         .header(REFERER, "https://www.bilibili.com/")
+        .header(COOKIE, cookie)
         .send()
         .await
         .map_err(|error| format!("读取 Bilibili WBI 配置失败：{error}"))?
         .error_for_status()
-        .map_err(|error| format!("读取 Bilibili WBI 配置失败：{error}"))?
+        .map_err(|error| map_bilibili_http_error(error, "读取 Bilibili WBI 配置失败"))?
         .json()
         .await
         .map_err(|error| format!("Bilibili WBI 配置解析失败：{error}"))?;
