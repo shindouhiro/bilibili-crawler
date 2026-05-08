@@ -4,13 +4,11 @@
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "dev": "pnpm dev:web",
-    "dev:api": "uv run uvicorn crawler.api:app --host 0.0.0.0 --port 8000 --reload",
+    "dev": "pnpm dev:desktop",
     "dev:desktop": "pnpm --filter @crawler/desktop dev",
-    "dev:start": "concurrently -k -n API,WEB -c cyan,blue \"pnpm dev:api\" \"pnpm dev:web-only\"",
-    "dev:web": "pnpm dev:stop && pnpm dev:start",
-    "dev:web-only": "pnpm --filter @crawler/web dev",
-    "dev:stop": "for port in 8000 5173; do lsof -ti tcp:$port | xargs kill 2>/dev/null || true; done",
+    "dev:api": "pnpm --filter @crawler/server dev",
+    "dev:start": "concurrently -k -n API,WEB -c cyan,blue \"pnpm dev:api\" \"pnpm dev:web\"",
+    "dev:web": "pnpm --filter @crawler/web dev",
     "build:android": "pnpm --filter @crawler/desktop build:android",
     "build:desktop": "pnpm --filter @crawler/desktop build",
     "build:web": "pnpm --filter @crawler/web build",
@@ -20,6 +18,6 @@
   },
   "devDependencies": {
     "bumpp": "^11.0.1",
-    "concurrently": "catalog:dev"
+    "concurrently": "^9.2.1"
   }
 }

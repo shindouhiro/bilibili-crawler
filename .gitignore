@@ -1,8 +1,4 @@
 .DS_Store
-.venv/
-__pycache__/
-.pytest_cache/
-.ruff_cache/
 dist/
 build/
 node_modules/
@@ -11,6 +7,5 @@ target/
 apps/desktop/src-tauri/target/
 *.tsbuildinfo
 downloads/
-*.egg-info/
 .codex/skills
 .agent/skills

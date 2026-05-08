@@ -27,9 +27,6 @@ catalogs:
     '@types/react-dom':
       specifier: ^19.2.0
       version: 19.2.3
-    concurrently:
-      specifier: ^9.2.1
-      version: 9.2.1
     eslint:
       specifier: ^9.39.0
       version: 9.39.4
@@ -82,7 +79,7 @@ importers:
         specifier: ^11.0.1
         version: 11.0.1
       concurrently:
-        specifier: catalog:dev
+        specifier: ^9.2.1
         version: 9.2.1
 
   apps/desktop:
@@ -90,6 +87,8 @@ importers:
       '@tauri-apps/cli':
         specifier: catalog:dev
         version: 2.11.0
+
+  apps/server: {}
 
   apps/web:
     dependencies:

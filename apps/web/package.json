@@ -1,10 +1,10 @@
 {
   "name": "@crawler/web",
-  "private": true,
-  "version": "0.1.8",
   "type": "module",
+  "version": "0.1.8",
+  "private": true,
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc -b && vite build",
     "lint": "eslint src"
   },
@@ -17,8 +17,9 @@
     "react-dom": "catalog:frontend"
   },
   "devDependencies": {
-    "@eslint-react/eslint-plugin": "catalog:dev",
     "@antfu/eslint-config": "catalog:dev",
+    "@eslint-react/eslint-plugin": "catalog:dev",
+    "@tailwindcss/vite": "catalog:dev",
     "@types/node": "catalog:dev",
     "@types/react": "catalog:dev",
     "@types/react-dom": "catalog:dev",
@@ -28,7 +29,6 @@
     "eslint-plugin-react-hooks": "catalog:dev",
     "eslint-plugin-react-refresh": "catalog:dev",
     "tailwindcss": "catalog:dev",
-    "@tailwindcss/vite": "catalog:dev",
     "typescript": "catalog:dev",
     "vite": "catalog:dev"
   }
