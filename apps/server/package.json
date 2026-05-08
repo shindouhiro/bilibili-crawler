@@ -1,0 +1,8 @@
+{
+  "name": "@crawler/server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "PATH=\"$HOME/.cargo/bin:$PATH\" cargo run"
+  }
+}
