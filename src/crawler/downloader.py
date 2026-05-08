@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from shutil import which
 from typing import Any
 
+import httpx
 from yt_dlp import YoutubeDL
 
 from crawler.models import SearchResult
@@ -61,11 +63,40 @@ class BilibiliDownloadError(RuntimeError):
     """下载或解析失败时抛出的业务异常。"""
 
 
+# yt-dlp BiliBili extractor 不支持的 URL 路径前缀
+_UNSUPPORTED_BILIBILI_PATHS = (
+    "/cheese/",   # 付费课程
+    "/read/",     # 专栏文章
+    "/audio/",    # 音频
+    "/opus/",     # 动态长文
+)
+
+
+def is_supported_bilibili_url(url: str) -> bool:
+    """判断 URL 是否是 yt-dlp BiliBili extractor 支持的视频链接。"""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if not host.endswith("bilibili.com"):
+        return False
+    for prefix in _UNSUPPORTED_BILIBILI_PATHS:
+        if parsed.path.startswith(prefix):
+            return False
+    return True
+
+
 def normalize_bilibili_url(url_or_bvid: str) -> str:
     value = url_or_bvid.strip()
     if not value:
         raise ValueError("视频地址不能为空")
     if value.startswith(("http://", "https://")):
+        if not is_supported_bilibili_url(value):
+            raise ValueError(
+                f"不支持此类型的 Bilibili 链接：{value}\n"
+                "目前仅支持普通视频（/video/）和番剧（/bangumi/），"
+                "不支持付费课程（/cheese/）、专栏（/read/）等。"
+            )
         return value
     if value.upper().startswith("BV"):
         return f"https://www.bilibili.com/video/{value}"
@@ -79,24 +110,118 @@ def search_videos(keyword: str, limit: int = 10, page: int = 1) -> list[SearchRe
 
     safe_limit = max(1, min(limit, 30))
     safe_page = max(1, min(page, 20))
-    fetch_limit = safe_limit * safe_page
-    options: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "http_headers": BILIBILI_HTTP_HEADERS,
-        "skip_download": True,
-        **_get_cookie_options(),
-    }
+
     try:
-        with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(f"bilisearch{fetch_limit}:{query}", download=False)
+        items = _search_bilibili_api(query, page=safe_page, page_size=safe_limit)
     except Exception as exc:  # noqa: BLE001
         raise BilibiliDownloadError(f"Bilibili 搜索失败：{exc}") from exc
 
-    entries = (info or {}).get("entries") or []
-    start = (safe_page - 1) * safe_limit
-    end = start + safe_limit
-    return [_to_search_result(entry) for entry in entries[start:end] if entry]
+    return [
+        _api_item_to_search_result(item)
+        for item in items
+        if _is_supported_api_item(item)
+    ]
+
+
+def _search_bilibili_api(
+    keyword: str,
+    page: int = 1,
+    page_size: int = 10,
+) -> list[dict[str, Any]]:
+    """通过 Bilibili 官方搜索 API 获取视频列表（与 Rust 端保持一致）。"""
+    params = {
+        "search_type": "video",
+        "keyword": keyword,
+        "page": str(page),
+        "page_size": str(page_size),
+    }
+    with httpx.Client(headers=BILIBILI_HTTP_HEADERS, timeout=15, follow_redirects=True) as client:
+        # 预热 Cookie（获取 buvid 等必要 Cookie）
+        client.get("https://www.bilibili.com")
+        response = client.get(
+            "https://api.bilibili.com/x/web-interface/search/type",
+            params=params,
+            headers={"Referer": "https://search.bilibili.com/"},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+    if data.get("code") != 0:
+        message = data.get("message") or "Bilibili 搜索 API 返回错误"
+        raise BilibiliDownloadError(message)
+
+    result_list = (data.get("data") or {}).get("result") or []
+    return result_list
+
+
+def _is_supported_api_item(item: dict[str, Any]) -> bool:
+    """过滤搜索结果中不支持下载的 Bilibili 内容类型。"""
+    url = item.get("arcurl") or ""
+    if url and not is_supported_bilibili_url(url):
+        logger.debug("跳过不支持的搜索结果：%s", url)
+        return False
+    return True
+
+
+def _api_item_to_search_result(item: dict[str, Any]) -> SearchResult:
+    """将 Bilibili 搜索 API 的原始数据转换为 SearchResult。"""
+    bvid = str(item.get("bvid") or "")
+    title = _clean_html(str(item.get("title") or "未命名视频"))
+    url = item.get("arcurl") or ""
+    if not url and bvid:
+        url = f"https://www.bilibili.com/video/{bvid}"
+
+    # 封面图可能以 // 开头，需要补全协议
+    thumbnail = item.get("pic") or None
+    if thumbnail and thumbnail.startswith("//"):
+        thumbnail = f"https:{thumbnail}"
+
+    # duration 格式为 "MM:SS" 或 "HH:MM:SS"，需要转换为秒
+    duration = _parse_duration(item.get("duration"))
+
+    return SearchResult(
+        id=bvid or str(url),
+        title=title,
+        url=str(url),
+        uploader=item.get("author"),
+        duration=duration,
+        view_count=item.get("play"),
+        thumbnail=thumbnail,
+    )
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _clean_html(value: str) -> str:
+    """移除 Bilibili 搜索结果标题中的 HTML 高亮标签。"""
+    cleaned = _HTML_TAG_RE.sub("", value)
+    return (
+        cleaned.replace("&quot;", '"')
+        .replace("&amp;", "&")
+        .replace("&#39;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+    )
+
+
+def _parse_duration(value: Any) -> float | None:
+    """解析 'MM:SS' 或 'HH:MM:SS' 格式的时长为秒数。"""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    parts = text.split(":")
+    try:
+        total = 0
+        for part in parts:
+            total = total * 60 + int(part)
+        return float(total)
+    except (ValueError, TypeError):
+        return None
 
 
 def download_video(
@@ -224,18 +349,3 @@ def _merged_path_from_fragment(fragment_path: Path) -> Path:
     return fragment_path.with_name(f"{stem}.mp4")
 
 
-def _to_search_result(entry: dict[str, Any]) -> SearchResult:
-    video_id = str(entry.get("id") or entry.get("display_id") or "")
-    url = entry.get("webpage_url") or entry.get("url") or ""
-    if video_id.upper().startswith("BV"):
-        url = f"https://www.bilibili.com/video/{video_id}"
-
-    return SearchResult(
-        id=video_id or str(url),
-        title=str(entry.get("title") or "未命名视频"),
-        url=str(url),
-        uploader=entry.get("uploader") or entry.get("channel"),
-        duration=entry.get("duration"),
-        view_count=entry.get("view_count"),
-        thumbnail=entry.get("thumbnail"),
-    )
